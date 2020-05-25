@@ -1,0 +1,3 @@
+zmq
+keras
+tensorflow==2.2.0
