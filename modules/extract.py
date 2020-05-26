@@ -47,11 +47,11 @@ def init_extraction(file_name):
 
     response = {
         'file_name': file_name,
-        'mfcc': mfcc,
-        'melspectrogram': mel,
-        'chroma_stft': c_stft,
-        'chroma_cqt':c_cqt,
-        'chroma_cens': c_cens
+        MFCC: mfcc,
+        MEL: mel,
+        C_STFT: c_stft,
+        C_CQT:c_cqt,
+        C_CENS: c_cens
     }
 
     if socket is not None:

@@ -3,11 +3,7 @@ from tkinter import *
 from tkinter.filedialog import askopenfilename
 import tkinter.scrolledtext as scrolledtext
 
-# import keras
-from tensorflow.keras.models import load_model
 import numpy as np
-# from keras.utils import CustomObjectScope
-# from keras.initializers import glorot_uniform
 
 # import tensorflow as tf
 # print(tf.__version__)
@@ -25,13 +21,25 @@ logger = logging.Logger(name="COPD_GUI", level=logging.DEBUG)
 
 validation_socket:zmq.Socket = None
 feature_socket:zmq.Socket = None
+predict_socket:zmq.Socket = None
+console_output = None
+
+
 
 def init_zmq_contexts():
+    """
+    DON'T FORGET TO DESTROY CONTEXTS BEFORE ENDING THE PROGRAM.
+
+    Init `zmq` contexts in the following order:
+    1. Validation Socket
+    2. Feature Socket
+    3. Prediction Socket
+    """
     global validation_socket
     global validation_context
     validation_context = zmq.Context()
 
-    print("Connecting to Validation server...")
+    logger.log(logging.DEBUG, "Connecting to Validation server...")
     validation_socket = validation_context.socket(zmq.REQ)
     validation_socket.connect("tcp://localhost:{}".format(VALIDATE_PORT))
 
@@ -39,66 +47,21 @@ def init_zmq_contexts():
     global feature_context
     feature_context = zmq.Context()
 
-    print("Connecting to Feature Extraction Server...")
+    logger.log(logging.DEBUG, "Connecting to Feature Extraction Server...")
     feature_socket = feature_context.socket(zmq.REQ)
     feature_socket.connect('tcp://localhost:{}'.format(FEATURE_PORT))
 
+    global predict_socket
+    global predict_context
+    predict_context = zmq.Context()
 
-console_output = None
-
-
-
-# #  Do 10 requests, waiting each time for a response
-# for request in range(10):
-#     print("Sending request %s …" % request)
-#     socket.send(b"Hello")
-
-#     #  Get the reply.
-#     message = socket.recv()
-#     print("Received reply %s [ %s ]" % (request, message))
-
-MFCC = 'mfcc'
-C_CENS = 'c_cens'
-MEL = 'mel'
-C_CQT = 'c_cqt'
-C_STFT = 'c_stft'
-
-feature_model_dirs = {
-    MFCC: 'mfcc',
-    C_CENS: 'chroma_cens',
-    MEL: 'melsprectrogram',
-    C_CQT: 'chroma_cqt',
-    C_STFT: 'chroma_stft'
-}
+    logger.log(logging.DEBUG, "Connecting to Predict Extraction Server...")
+    predict_socket = predict_context.socket(zmq.REQ)
+    predict_socket.connect('tcp://localhost:{}'.format(PREDICT_PORT))
 
 
 
 
-def load_model_from_file(type=None):
-    model_dir = 'saved_models'
-
-    if type not in [MFCC, C_CENS, MEL, C_CQT, C_STFT]:
-        raise Exception("Invalid type.")
-
-    concerned_dir = os.path.join(model_dir, feature_model_dirs[type])
-
-    dir_contents = os.listdir(concerned_dir)
-
-    if len(dir_contents) == 0:
-        raise Exception("No model found in {}".format(concerned_dir))
-
-    list_dir = [f.lower() for f in dir_contents]   # Convert to lower case
-    
-    model_name = sorted(list_dir)[-1]
-
-    logger.debug('Found best model "{}" for type: {}'.format(model_name, feature_model_dirs[type]))
-
-    model_path = os.path.join(concerned_dir, model_name)
-
-    logger.log(logging.DEBUG, "Loading {} model...".format(type))
-    model = load_model(model_path)
-
-    return model
 
 
 def validate_file(filename):
@@ -155,11 +118,11 @@ def get_features(file_name):
     ```
     response = {
         'file_name': file_name,
-        'mfcc': mfcc,
-        'melspectrogram': mel,
-        'chroma_stft': c_stft,
-        'chroma_cqt':c_cqt,
-        'chroma_cens': c_cens
+        MFCC: mfcc,
+        MEL: mel,
+        C_STFT: c_stft,
+        C_CQT:c_cqt,
+        C_CENS: c_cens
     }
     ```
     """
@@ -190,6 +153,14 @@ def get_features(file_name):
     #     else:
     #         print("Values for key {} different | {} | {}".format(key, features_dict[k], test_features_dict[k]))
 
+def get_prediction(feature_type, feature_value):
+    console_output.insert(END, '\nRequesting prediction for feature {}...'.format(feature_type))
+
+    predict_socket.send_pyobj({
+        'feature_type': feature_type,
+        'content': feature_value
+    })
+
 
 def open_file_picker():
     filename = askopenfilename(filetypes=[("wav files", '.wav')])
@@ -206,9 +177,17 @@ def open_file_picker():
     if not is_valid:
         return
 
+    console_output.insert(END, '\n')
     features = get_features(filename)
 
+    del features['file_name']
 
+    for key in features.keys():
+        get_prediction(key, features[key])
+
+        prediction = predict_socket.recv_pyobj()
+
+        console_output.insert(END, '\nPrediction: Model Name: {} | Predicted Class: {}'.format(prediction['model'], prediction['class']))
 
 def init_root_window():
     root = Tk()
@@ -254,17 +233,6 @@ if __name__ == "__main__":
     # chroma_cens_model = load_model('saved_models/chroma_cens')
 
     # init_root_window()
-    global mfcc_model
-    global mel_model
-    global chroma_cens_model
-    global chroma_cqt_model
-    global chroma_stft_model
-
-    mfcc_model = load_model_from_file(MFCC)
-    mel_model = load_model_from_file(MEL)
-    chroma_cens_model = load_model_from_file(C_CENS)
-    chroma_cqt_model = load_model_from_file(C_CQT)
-    chroma_stft_model = load_model_from_file(C_STFT)
 
     logger.log(logging.INFO, "Init zmq contexts...")
     init_zmq_contexts()
